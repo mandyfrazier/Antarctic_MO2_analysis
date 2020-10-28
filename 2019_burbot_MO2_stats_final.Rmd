@@ -1,0 +1,491 @@
+---
+title: "2019_burbot_MO2_stats"
+author: "Amanda"
+date: "2/4/2019"
+output: html_document
+---
+
+This code documents the data exploration, modeling, and statistics that were run on the burbot metabolic rate data from July 2018 for Mandy's MS thesis on burbot. 
+
+IMPORTANT: This file is to go alongisde the 2018_burbot_resp_analysis.RMD file. You'll need to run that code to generate the O2.all.final data frame to run this code. The O2.all.final dataframe are the average three lowest slopes (after removing M1 and M2) and are all blank corrected. 
+
+```{r}
+
+# Subset O2.all.final for the data we need for statistics (we don't need the MO2 values in ten different units).
+MO2 <- subset(O2.all.final, select = c("FishID", "meanTemp", "Day", "Batch", "Family", "FeedStrat", "Chamber", "Weight.g.", "TotalLength.mm.", "mass.specific.rate.umolO2ghr"))
+
+# Droplevels function to remove levels that are "leftover" from generating the slopes
+MO2 <- droplevels(MO2)
+
+
+# Load packages:
+library(nlme)
+library(ggplot2)
+library(HH)
+library(nlme)
+library(lme4)
+library(cowplot)
+library(stringr)
+
+```
+
+
+## Data exploration
+Before doing ANY statistics or modeling, you want to do some general data exploration. This will give you insight into flags (e.g. outliers, batch effects, etc.) that you may want to explore in the models. 
+```{r}
+
+# Check to make sure data types are encoded correctly and that there are no glaring omissions / typos:
+str(MO2)
+summary(MO2)
+
+# Check spread of mass specific metabolic rates without looking at treatment: 
+ggplot(MO2, aes(x=FishID, y=mass.specific.rate.umolO2ghr)) + 
+  geom_point()
+## There is one super low value that looks concerning. This value is also from Chamber P2, which was the problematic chamber. 
+
+# Cleveland dot plot
+
+dotchart(MO2$mass.specific.rate.umolO2ghr, main = "Cleveland Dotplot", xlab= "Metabolic Rate (umol O2 / (g*hr)", ylab="Order of Samples")
+
+# Looks like there could also be a few outliers far right. I wonder if this is just a particularly large family? 
+
+dotchart(MO2$mass.specific.rate.umolO2ghr, groups = factor(MO2$Family), main = "Cleveland Dotplot", xlab= "Metabolic Rate (umol O2 / (g*hr)", ylab="Order of Samples")
+
+## Interesting, it looks like family L1 has the majority of the high values. This was also the family that was run on Day 1. Maybe it's handling stress?
+
+# What about by feed strat? 
+
+dotchart(MO2$mass.specific.rate.umolO2ghr, groups = factor(MO2$FeedStrat), main = "Cleveland Dotplot", xlab= "Metabolic Rate (umol O2 / (g*hr)", ylab="Order of Samples")
+
+## Overall the spread of the data values looks the same for Family and for Feeding Strategy, the two variables of primary interest. This means we are probably not violating the assumption of homogeneity. There may be a few outliers, though. 
+
+
+# What about by chamber?
+
+dotchart(MO2$mass.specific.rate.umolO2ghr, groups = factor(MO2$Chamber), main = "Cleveland Dotplot", xlab= "Metabolic Rate (umol O2 / (g*hr)", ylab="Order of Samples")
+
+## Chamber P2 definitely looks skewed to the left compared to the rest of the data. 
+
+
+# Not only should we look at dotplots of the response variable (metabolic rate), we should also examine dotplots of the explanatory variables. Note that you can only look at numerical variables with this function: 
+
+dotchart(MO2$Weight.g., main="Cleveland Dotpot", xlab="Weight of fish", ylab="order of samples")
+dotchart(MO2$TotalLength.mm., main="Cleveland Dotpot", xlab="fish Length", ylab="order of samples")
+
+
+# Boxplot 
+
+pd <-position_dodge(0.8)
+p=ggplot(data=MO2, aes(x=FeedStrat, y=mass.specific.rate.umolO2ghr))
+p+geom_boxplot(position=pd) + 
+  labs(x = "Feeding Strategy", y="Metabolic Rate (umol O2/(g*hr)") 
+
+pd <-position_dodge(0.8)
+p=ggplot(data=MO2, aes(x=Family, y=mass.specific.rate.umolO2ghr))
+p+geom_boxplot(position=pd) + 
+  labs(x = "Family", y="Metabolic Rate (umol O2/(g*hr)") 
+
+boxplot(MO2$mass.specific.rate.umolO2ghr ~ MO2$FeedStrat + MO2$Family)
+
+# Potentially a few high outliers (3 for each feeding strategy). However, Zurr et al. says that just because boxplot picks these few out doesn't mean you should definitely remove them! You should only remove outliers if you have a biological/experimental justification. 
+
+
+# Let's look at all of that again using color and shape! This is a good way to view multiple factors at once (in this case, feeding strategy, chamber, and family):
+
+g1 <- ggplot(MO2, aes(x=FishID, y=mass.specific.rate.umolO2ghr,
+                                shape = FeedStrat, color = Chamber)) + 
+  geom_point(size=5) + facet_grid(~Family, scales = "free_x") +
+  theme(panel.background = element_rect(color = "black"), axis.text.x = element_blank())
+
+g2 <- ggplot(MO2, aes(x=FishID, y=mass.specific.rate.umolO2ghr,
+                         shape = FeedStrat, color = as.factor(Batch))) + 
+  geom_point(size=5) + facet_grid(~Family, scales = "free_x") +
+  theme(panel.background = element_rect(color = "black"), axis.text.x = element_blank())
+
+g3 <- ggplot(MO2, aes(x=FishID, y=mass.specific.rate.umolO2ghr,
+                                shape = FeedStrat, color = Family)) + 
+  geom_point(size=5) + facet_grid(~Chamber, scales = "free_x") +
+  theme(panel.background = element_rect(color = "black"), axis.text.x = element_blank())
+
+plot_grid(g1,g2,g3, nrow = 3)
+
+# There really aren't any patterns that immediately pop out. Except the first batch of Day 1 (Family L1) are all elevated. I would definitely interpret that as handling stress from our first go at the experiment. 
+
+# So, after doing some data exploration, we have some things we definitely want to examine further in the models to see if they have an effect: Batch (Time of Day), Chamber (especially P2), and suspicious outliers (especially the one super low one in P2). 
+
+
+# I decided to remove D4_B1_P2 (the low outlier, observation #78) from the analysis. I have notes from during the trials that the traces looked very strange compared to the other planktivores. This sample also has a very low R2 for the slope (0.71). Perhaps the stopper wasn't on all the way or something and that there was freshwater leaking into the chamber. Based on the residuals and qqplots, this outlier strongly skews the planktivores and should be removed. 
+
+# Look at the average metabolic rates based on feeding strategy, with and without the outlier:
+aggregate(MO2$mass.specific.rate.umolO2ghr, by = list(MO2$FeedStrat), mean)
+aggregate(MO2$mass.specific.rate.umolO2ghr[-78], by = list(MO2$FeedStrat[-78]), mean)
+
+# Look at the average metabolic rates based on chamber, with and without the outlier:
+aggregate(MO2$mass.specific.rate.umolO2ghr, by = list(MO2$Chamber), mean)
+aggregate(MO2$mass.specific.rate.umolO2ghr[-78], by = list(MO2$Chamber[-78]), mean) 
+## That one sample was clearly strongly skewing the planktivore data and the data for the P2 chamber. 
+
+```
+
+
+## Modeling
+There are different methods of going about creating a model. I am following the strategy of starting at the simplest model first, then building up the model from there. I each model to the previous best model and went from there. The most important thing is that the models are based in the biological understanding of the system and that you write models that are testing what you want them to be testing. If multiple models are not statistically different or including additional terms doesn't make them fit the data better, then always chose the simplest model (the most parsimonious). It's okay to look at different models if they all make sense biologically, but don't just go randomly testing models. Think about the question and the biological system and then test a few relevant models.  
+
+```{r}
+
+# Start with the simplest model, then go from there: 
+
+# 1. Just feeding strategy
+mod1 <- lm(mass.specific.rate.umolO2ghr~FeedStrat, data = MO2)
+summary(mod1)
+plot(mod1) # The qqplot looks concerning and inidcates non-normality. I will probably want to log correct the data. 
+hist(MO2$mass.specific.rate.umolO2ghr, breaks = 30) 
+hist(log(MO2$mass.specific.rate.umolO2ghr), breaks = 30) # histogram of log-corrected data looks better (except for low outlier)
+
+# 2. Family as a fixed effect
+
+mod2 <- lm(mass.specific.rate.umolO2ghr~ FeedStrat + Family, data = MO2)
+
+# 3. Family as a random effect
+mod3 <- lmer(mass.specific.rate.umolO2ghr~ FeedStrat + (1|Family), data=MO2)
+
+
+AIC(mod1, mod2, mod3) #Use AIC to compare models. From Zuur, "AIC quantifies the relative proximity to absolute reality amongst a candidate set of models, ideally chosen a priori." All of the models are pretty much the same so far. I think it definitely makes sense to include Family in some form, let's see how the other variables affect the model and then check family again later. 
+
+
+# 4. Include chamber as a random effect
+# During the experiment and while calculating slopes, I noticed that one of the chambers (P2) seemed strange where the values all seemed very low compared to the other planktivore chambers. I'm skeptical of taking the metabolic rate from these chambers as-is because of this observation, but I also don't think that I need to remove them completely because they are still information. 
+# Note that it's OK to just include Chamber (which treats all eight chambers as the same "level"), even though there are really two levels, the first being the type of chamber (feeding strategy) and the second being the chamber number. I thought I would have to nest these in the model (e.g. FeedStrat:chambernumber) but I don't have to do that because I'm already including Feeding Strategy in the model and that will include those effects already. I compared those models and they are identical. 
+
+mod4 <- lmer(mass.specific.rate.umolO2ghr~FeedStrat + Family + (1|Chamber), data = MO2) 
+
+AIC(mod1, mod2, mod3, mod4) # Including chamber greatly improves the model! 
+
+mod4b <- lmer(mass.specific.rate.umolO2ghr~FeedStrat + (1|Family) + (1|Chamber), data = MO2)
+AIC(mod4, mod4b) 
+plot(mod4)
+qqnorm(residuals(mod4))
+qqline(resid(mod4))
+
+# It looks like including family as a fixed effect rather than a random effect is so far the best.
+
+
+# 5. Include "adapted" as a fixed effect with family as a random effect?
+
+## Add column adapted for environment that they're adapted to
+MO2$adapted = as.factor( str_replace_all(MO2$Family,
+                c("L1" = "Lake",
+                  "L2" = "Lake", 
+                  "R1" = "River", 
+                  "R2" = "River")))
+
+## Add column FamilyNumber 
+MO2$FamilyNumber = as.numeric(str_extract(string = MO2$Family, pattern = "[0-9]{1}"))
+
+mod5 <- lmer(mass.specific.rate.umolO2ghr ~ FeedStrat + adapted + (1|adapted:FamilyNumber) + (1|Chamber), data=MO2)
+
+summary(mod5)
+anova(mod5)
+plot(mod5) # Very skewed residuals. The residuals on the left are all below the line, we want a more even spread. 
+qqnorm(residuals(mod5)) 
+qqline(resid(mod5)) # Yikes, qqplot also indicates non-normal residuals 
+
+# 5b. Try log correcting the MO2 values. 
+
+MO2$log.mass.specific.rate.umolO2ghr = log(MO2$mass.specific.rate.umolO2ghr)
+
+mod5b <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + adapted + (1|adapted:FamilyNumber) + (1|Chamber), data=MO2)
+summary(mod5b)
+anova(mod5b)
+plot(mod5b) #Residuals look way better 
+AIC(mod5, mod5b) # Log-correcting the data makes the model fit waaaay better 
+qqnorm(residuals(mod5b))
+qqline(resid(mod5b)) # qqplot also looks way better, except for the big outlier. Definitely remove this. 
+
+# 5c. Without the outlier
+mod5c <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + adapted + (1|adapted:FamilyNumber) + (1|Chamber), data=MO2[-78,]) 
+plot(mod5c)
+qqnorm(residuals(mod5c))
+qqline(resid(mod5c))
+
+AIC(mod5b, mod5c) # The model also fits better without the outlier. 
+
+
+# 6. What about including time of day (i.e. batch)? 
+
+mod6 <- lmer(log.mass.specific.rate.umolO2ghr~ FeedStrat + adapted + (1|adapted:FamilyNumber) + (1|Chamber) + (1|Batch), data=MO2[-78,]) 
+
+AIC(mod6, mod5c)
+anova(mod6, mod5c) # Batch doesn't help fit the data better, don't include it in the model.
+
+# 7. Rather than including a chamber effect for all, try an indicator for P2 since that's the only chamber that's weird: 
+MO2$Chamber.P2 = MO2$Chamber == "P2"
+mod7 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + adapted + (1|adapted:FamilyNumber) + Chamber.P2, data=MO2[-78,]) 
+plot(mod7)
+qqnorm(residuals(mod7))
+qqline(resid(mod7))
+
+AIC(mod5c, mod7)
+anova(mod5c, mod7)
+## Including just the P2 chamber as an indicator instead of all of the chambers fits the data better. 
+anova(mod7)
+
+# 8. Interaction between feeding strategy and adapted?
+mod8 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat*adapted + (1|adapted:FamilyNumber) + Chamber.P2, data=MO2[-78,]) 
+AIC(mod7, mod8)
+anova(mod7, mod8)
+## Doesn't add anything to the model and just makes it more complicated. 
+
+# 9. Now that the data is log-transformed, the outlier is removed, and chamber is included, I want to check the Family question again:
+mod9 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + (1|Family) + Chamber.P2, data=MO2[-78,]) 
+mod10 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + Family + (1|Chamber), data=MO2[-78,]) 
+mod11 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat + (1|Family) + (1|Chamber), data=MO2[-78,]) 
+
+mod12 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat*Family + (1|Chamber), data=MO2[-78,])
+anova(mod9, mod12)
+AIC(mod9, mod12)
+AIC(mod7, mod9, mod10, mod11, mod12)
+anova(mod7, mod9, mod10, mod11)
+## Model 9 is the best fitting model. It is also simpler to include Family in this way. Note that the inferences don't change at all. 
+
+# What about fish weight and temperature? I strongly think that you should not include these in the model because they're already incorporated into the calculation of metabolic rate. If you include them then you risk pseudo correlation or auto correlation, where you are over-confident in your model because you're fitting the model to a variable that you used to generate the response values. 
+
+
+# Best model
+
+best_mod <- mod12
+residuals <- resid(best_mod) 
+# Residuals are the observed values minus the fitted values. 
+hist(residuals) # Looks beautiful after log-correcting and removing the outlier! 
+
+# Check to see if the variance of treatment groups is the same. 
+hov(residuals~factor(FeedStrat), data=MO2[-78,])
+hov(residuals~factor(adapted), data=MO2[-78,])
+## Variance between adapted and feeding strategy is the same.  
+
+plot(best_mod)
+scatter.smooth(fitted(best_mod), resid(best_mod), main="Tukey-Anscombe Plot")
+qqnorm(resid(best_mod), main="normal QQ-plot, residuals")
+qqline(resid(best_mod))
+
+mod12 <- lmer(log.mass.specific.rate.umolO2ghr ~ FeedStrat*Family + (1|Chamber), REML = TRUE, data=MO2[-78,])
+anova(mod12)
+summary(mod12)
+MO2lsmeans <- lsmeans(mod12, tukey ~ FeedStrat*Family)
+CLD(MO2lsmeans) 
+
+# qq plot looks great after log-correcting and removing the outlier 
+
+shapiro.test(residuals) # Indicates data is normally distributed. 
+
+# Note that log-transforming the data makes sense, because a normal distribution assumes that the values are centered around zero and can be negative (which is obviously not true). Log transforming the data makes all the values positive, which is how our data is distributed.
+
+
+#### IMPORTANT NOTE: 
+# After reviewing the models, I do think it makes the most sense to include family as an interactive effect, because we are interested in understanding that. Based on the plot, it definitely looks like family has an effect. So we are NOT USING model 9, but instead model 12!!!!!!!! While the AIC score is higher for mod12, AIC score is just one way to evaluate models. We want to be able to look at any interactive effects, so based on our biological interests we should choose model 12. 
+
+car::Anova(mod12)
+
+broom.mixed::tidy(mod12)
+summary(mod12)
+View(broom::glance(mod12))
+
+
+```
+
+## Graphing
+```{r}
+
+# Graph boxplot of MO2 by feeding strategy, with points for the average of each family. 
+
+## New dataframe with the outlier removed, calculate mean for each family, standard deviation, and standard error. 
+MO2.summary <- MO2[-78,] %>%
+  group_by(FeedStrat, Family) %>%
+  mutate(
+  n = length(mass.specific.rate.umolO2ghr),
+  mean.MO2.feed.fam = mean(mass.specific.rate.umolO2ghr),
+  sd.MO2.feed.fam = sd(mass.specific.rate.umolO2ghr),
+  se.MO2.feed.fam = sd.MO2.feed.fam / sqrt(n),
+  mean.log.MO2.feed.fam = mean(log.mass.specific.rate.umolO2ghr),
+  sd.log.MO2.feed.fam = sd(log.mass.specific.rate.umolO2ghr),
+  se.log.MO2.feed.fam = sd.log.MO2.feed.fam / sqrt(n)
+  )
+  
+
+scale_fill_manual(name = "Feeding Strategy", labels = c("Cannibal", "Non-cannibal"), values=c("#56B4E9", "#00BF7D"))
+
+# Using unadjusted values  
+  pd <- position_dodge(0.8)
+  p = ggplot(data = MO2.summary, aes(x = FeedStrat, y = mass.specific.rate.umolO2ghr))
+  p + geom_boxplot(aes(fill = FeedStrat),
+  position = pd,
+  outlier.alpha = NULL) +
+  labs(x = "Feeding Strategy", y = expression(paste("Metabolic Rate (",mu, "mol O"[2]," g"^-1, " hr"^-1, ")"))) + coord_cartesian(ylim=c(0,20)) + 
+  geom_vline(
+  xintercept = c(1.5, 3.5, 4.5),
+  linetype = "solid",
+  color = "darkgrey"
+  ) + scale_fill_manual(name = "Feeding Strategy", labels = c("Cannibal", "Non-canibal"), values = c("#56B4E9", "#00BF7D")) + theme_bw() + theme(
+  legend.title= element_text(size=12, color="black"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.text.x = element_blank(), 
+  axis.ticks.x = element_blank(),
+  axis.text = element_text(size = 12, color = "black"),
+  title = element_text(size = 14),
+  legend.text = element_text(size = 12),
+  legend.box.background = element_rect(color = "black")
+  ) + 
+    geom_point(
+  data = MO2.summary,
+  aes(
+  x = FeedStrat,
+  y = mean.MO2.feed.fam,
+  group = interaction(FeedStrat, Family),
+  shape = Family
+  ),
+  position = position_dodge(width = 0.8),
+  size = 3, fill="black") +
+  scale_shape_manual(values=c(21, 22, 23, 24)) +
+  geom_errorbar(
+  data = MO2.summary,
+  aes(
+  ymax = mean.MO2.feed.fam + se.MO2.feed.fam,
+  ymin = mean.MO2.feed.fam - se.MO2.feed.fam,
+  group = interaction(FeedStrat, Family)
+  ),
+  width = 0,
+  position = position_dodge(width = 0.8)
+  )
+  
+  # ggsave("/Users/amanda/Projects/Burbot/BurbotEnzymePaperPlots/Final/2018MO2boxplot.png", height = 4, width = 6, dpi=300, scale=1.2)
+  
+# Using log-adjusted values 
+pd <- position_dodge(0.8)
+  p = ggplot(data = MO2.summary, aes(x = FeedStrat, y = log.mass.specific.rate.umolO2ghr))
+  p + geom_boxplot(aes(fill = FeedStrat),
+  position = pd,
+  outlier.alpha = 0) +
+  labs(x = "Feeding Strategy", y = "Log Corrected Metabolic Rate (umol O2/(g*hr)") + geom_vline(
+  xintercept = c(1.5, 3.5, 4.5),
+  linetype = "solid",
+  color = "darkgrey"
+  ) + scale_fill_manual(values = c("#56B4E9", "#00BF7D")) + theme_bw() + theme(
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  legend.title = element_blank(),
+  axis.text = element_text(size = 12, color = "black"),
+  title = element_text(size = 14),
+  legend.text = element_text(size = 12),
+  legend.box.background = element_rect(color = "black")
+  ) + geom_point(
+  data = MO2.summary,
+  aes(
+  x = FeedStrat,
+  y = mean.log.MO2.feed.fam,
+  group = interaction(FeedStrat, Family),
+  shape = Family
+  ),
+  position = position_dodge(width = 0.8),
+  size = 3
+  ) +
+  geom_errorbar(
+  data = MO2.summary,
+  aes(
+  ymax = mean.log.MO2.feed.fam + se.log.MO2.feed.fam,
+  ymin = mean.log.MO2.feed.fam - se.log.MO2.feed.fam,
+  group = interaction(FeedStrat, Family)
+  ),
+  width = 0,
+  position = position_dodge(width = 0.8),
+  alpha = 0.5
+  ) 
+  
+  
+  
+
+```
+
+## Morphometrics 
+
+```{r, eval = T}
+# Calculate condition factor: 
+
+MO2$CF <- 100*(MO2$Weight.g./((MO2$TotalLength.mm./10)^3))
+
+# Calculate mean, sd, and se of condition factor per family 
+CF.grouped <- MO2 %>%
+group_by(FeedStrat, Family) %>%
+mutate(n=length(CF), CF.mean.feed.fam=mean(CF), CF.sd.mean.feed.fam=sd(CF), CF.se.mean.feed.fam=CF.sd.mean.feed.fam/sqrt(n))
+
+
+# Graph condition factor: 
+
+pd <- position_dodge(0.8)
+p=ggplot(data=MO2, aes(x=FeedStrat, y=CF))
+p+geom_boxplot(aes(fill=FeedStrat), position=pd, outlier.alpha=0) +
+  labs(x="Feeding Strategy", y="Condition Factor") +
+  geom_vline(xintercept=c(1.5, 3.5, 4.5), linetype="solid", color="darkgrey") +
+  scale_fill_manual(values=c("#56B4E9", "#00BF7D")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        legend.title=element_blank(), 
+        axis.text = element_text(size=12, color="black"), 
+        title = element_text(size=14), 
+        legend.text = element_text(size=12), 
+        legend.box.background = element_rect(color="black")#,
+       # legend.position = c(0.9, 0.91)) 
+  ) +
+ geom_point(data=CF.grouped, 
+             aes(x=FeedStrat, y=CF.mean.feed.fam,
+                 group = interaction(FeedStrat, Family), shape=Family), 
+             position = position_dodge(width = 0.8), size=3) +
+  geom_errorbar(data=CF.grouped, aes(ymax = CF.mean.feed.fam+CF.se.mean.feed.fam, #Note that error bars are the standard error!
+                                              ymin = CF.mean.feed.fam-CF.se.mean.feed.fam, #Note that error bars are the standard error! 
+                                              group=interaction(FeedStrat, Family)), 
+                width=0, position = position_dodge(width = 0.8), alpha=0.5)
+
+# Graph mass 
+
+p=ggplot(data=MO2, aes(x=Family, y=Weight.g.))
+p+geom_boxplot(aes(fill=FeedStrat), position=pd) + scale_fill_manual(values=c("#56B4E9", "#00BF7D")) + coord_cartesian(ylim=c(0,3.5)) +
+  labs(x = "Family", y="Mass (ww, g)") + geom_vline(xintercept=c(1.5, 2.5, 3.5, 4.5), linetype="solid", color="darkgrey") +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank(), 
+    axis.text = element_text(size=12, color="black"), 
+    title = element_text(size=14),
+    legend.text = element_text(size=12), 
+    legend.box.background = element_rect(color="black"), 
+    legend.position = c(0.9, 0.91))
+
+p=ggplot(data=MO2, aes(x=Family, y=Weight.g.))
+p+geom_point(aes(fill=FeedStrat), position=pd) + scale_fill_manual(values=c("#56B4E9", "#00BF7D")) + coord_cartesian(ylim=c(0,3.5)) +
+  labs(x = "Family", y="Mass (ww, g)") + geom_vline(xintercept=c(1.5, 2.5, 3.5, 4.5), linetype="solid", color="darkgrey") +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank(), 
+    axis.text = element_text(size=12, color="black"), 
+    title = element_text(size=14),
+    legend.text = element_text(size=12), 
+    legend.box.background = element_rect(color="black"), 
+    legend.position = c(0.9, 0.91))
+
+
+
+```
+
+
+# Reporting values: 
+```{r}
+
+mean(subset(MO2.summary, Family == "R2" & FeedStrat == "Cannibal")$mass.specific.rate.umolO2ghr)
+sd(subset(MO2.summary, Family == "R2" & FeedStrat == "Cannibal")$mass.specific.rate.umolO2ghr)
+mean(subset(MO2.summary, Family == "R2" & FeedStrat == "Planktivore")$mass.specific.rate.umolO2ghr)
+sd(subset(MO2.summary, Family == "R2" & FeedStrat == "Planktivore")$mass.specific.rate.umolO2ghr)
+
+```

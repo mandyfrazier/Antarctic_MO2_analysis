@@ -1,0 +1,705 @@
+---
+title: "MO2_analysis_example"
+author: "Amanda"
+date: "8/12/2020"
+output: html_document
+---
+
+This code is developed by Erin Flynn, Vanessa Lo, and Amanda Frazier. 
+
+## Load functions
+
+First, load the functions you'll need and set the working directory:
+```{r Load functions}
+library(ggplot2);library(plyr);library(dplyr);library(reshape2);library(gtools);library(lubridate);library(magrittr);library(stringr);library(scales); library(tidyr)
+
+setwd("/Users/amandafrazier/Documents/Davis/BurbotExperiment/2018_burbot_resp/Respirometry/")
+```
+
+## Readclean
+Create a function called "readclean" to read in the raw autoresp text files. The function skips the first 37 lines, renames the columns, and sets the datetime column. 
+```{r}
+readclean = function(x) { y = read.delim(x, skip=37, stringsAsFactors=F, fileEncoding="latin1") 
+z = y[,c(1,2,4,6,7,10,13,16)]
+names(z) <- c("DateTime","Phase","Salinity","Temp","CH1O2.sat","CH2O2.sat","CH3O2.sat","CH4O2.sat")
+z$DateTime <- as.POSIXct(z$DateTime, format = "%m/%d/%Y/%I:%M:%S %p")
+z}
+
+# Note that the "fileEncoding" is for Mac's only, don't need for PC 
+# POSIX format could be different depending on PC used for MO2 experiments
+```
+
+## Load txt files & find slope
+
+### D1_B1_C (one example file)
+```{r}
+# Load txt file
+RMR_raw <- readclean("2018_burbot_resp_D1_B1_C_raw.txt")
+
+# Assign names for this trial: 
+
+"Fish1" <- "D1_B1_C1"
+"Fish2" <- "D1_B1_C2"
+"Fish3" <- "D1_B1_C3"
+"Fish4" <- "D1_B1_C4"
+
+# Create a new column with the time in minutes from the start of the file: 
+
+RMR_raw$Time.m <- sapply(seq_along(RMR_raw$DateTime),
+function(i) as.numeric(difftime(RMR_raw$DateTime[i], RMR_raw$DateTime[1], units='mins')))
+
+
+# Pull measure periods. Grep finds all of the data in the Phase column that contains the letter M. 
+
+RMR <- RMR_raw[grep("M", RMR_raw$Phase), ]
+
+
+# Pull out first value of each phase for graphing later
+Phase.start <- ddply(RMR, "Phase", head, 1)
+Phase.start <- Phase.start[,1:2]
+
+# Change the column names of the chambers to the appropriate FishID:
+Name.vec <- c(Fish1, Fish2, Fish3, Fish4)
+names(RMR)[5:8] <- Name.vec
+
+
+# Reshape the data so all O2 saturation values are in a single column:
+
+RMR.2 <- melt(RMR, measure = Name.vec)
+
+# Rename the columns. 
+names(RMR.2) <-c("DateTime","Phase","Salinity","Temp","Time.m","FishID","O2.sat")
+
+# Plot the measurement periods of all fish from this trial:
+p=ggplot(data=RMR.2, aes(x=Time.m, y=O2.sat, group=Phase))
+p+geom_point(aes(color=FishID))+theme_bw()
+
+
+# Separate out individual fish for graphing/analysis:
+
+## Separate each fish to it's own RMR file: 
+Fish1_RMR <- filter(RMR.2, FishID == Fish1)
+Fish2_RMR <- filter(RMR.2, FishID == Fish2)
+Fish3_RMR <- filter(RMR.2, FishID == Fish3)
+Fish4_RMR <- filter(RMR.2, FishID == Fish4)
+
+
+```
+
+
+```{r, eval=FALSE}
+## Plot individual measurement periods for each fish: 
+
+p=ggplot(data=Fish1_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase), group=1)+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish1) 
+
+p=ggplot(data=Fish2_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish2) 
+
+p=ggplot(data=Fish3_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish3) 
+
+p=ggplot(data=Fish4_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish4) 
+
+##Plot individual measurement periods with the line of best fit: 
+
+p=ggplot(data=Fish1_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish1) 
+
+p=ggplot(data=Fish2_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish2) 
+
+p=ggplot(data=Fish3_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish3) 
+
+p=ggplot(data=Fish4_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish4) 
+```
+
+```{r}
+# Calculate slopes of lines for each fish and convert slope from minutes to hours:
+O2slopel1 <- dlply(Fish1_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope1 <- ldply(O2slopel1, function(d) coef(d))
+names(O2slope1) <- c("Phase", "Intercept","Slope")
+O2slope1<- mutate(O2slope1, FishID = Fish1)
+O2slope1<-ddply(O2slope1, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel2 <- dlply(Fish2_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope2 <- ldply(O2slopel2, function(d) coef(d))
+names(O2slope2) <- c("Phase", "Intercept","Slope")
+O2slope2 <- mutate(O2slope2, FishID = Fish2)
+O2slope2<-ddply(O2slope2, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel3 <- dlply(Fish3_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope3 <- ldply(O2slopel3, function(d) coef(d))
+names(O2slope3) <- c("Phase", "Intercept","Slope")
+O2slope3 <- mutate(O2slope3, FishID = Fish3)
+O2slope3<-ddply(O2slope3, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel4 <- dlply(Fish4_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope4 <- ldply(O2slopel4, function(d) coef(d))
+names(O2slope4) <- c("Phase", "Intercept","Slope")
+O2slope4 <- mutate(O2slope4, FishID = Fish4)
+O2slope4<-ddply(O2slope4, .(Phase), mutate, Slope.hour=Slope*60)
+
+
+# Calculating the fit of each slope: 
+O2.r2.1 <- dlply(Fish1_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit1<-ldply(O2.r2.1, function(d) d$r.squared)
+slopefit1
+names(slopefit1) <-c("Phase","r2")
+
+O2.r2.2 <- dlply(Fish2_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit2<-ldply(O2.r2.2, function(d) d$r.squared)
+slopefit2
+names(slopefit2) <-c("Phase","r2")
+
+O2.r2.3 <- dlply(Fish3_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit3<-ldply(O2.r2.3, function(d) d$r.squared)
+slopefit3
+names(slopefit3) <-c("Phase","r2")
+
+O2.r2.4 <- dlply(Fish4_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit4<-ldply(O2.r2.4, function(d) d$r.squared)
+slopefit4
+names(slopefit4) <-c("Phase","r2")
+
+
+# merge together slope and r2:
+O2slope.r2.1<-merge(O2slope1, slopefit1, by=c("Phase"))
+O2slope.r2.1<- O2slope.r2.1[mixedorder(O2slope.r2.1$Phase),]
+O2slope.r2.1
+
+O2slope.r2.2<-merge(O2slope2, slopefit2, by=c("Phase"))
+O2slope.r2.2<- O2slope.r2.2[mixedorder(O2slope.r2.2$Phase),]
+O2slope.r2.2
+
+O2slope.r2.3<-merge(O2slope3, slopefit3, by=c("Phase"))
+O2slope.r2.3<- O2slope.r2.3[mixedorder(O2slope.r2.3$Phase),]
+O2slope.r2.3
+
+O2slope.r2.4<-merge(O2slope4, slopefit4, by=c("Phase"))
+O2slope.r2.4<- O2slope.r2.4[mixedorder(O2slope.r2.4$Phase),]
+O2slope.r2.4
+
+# bind all slope and r2 dataframes and sort the phases so they're in order:
+slopes.r2.all <- rbind(O2slope.r2.1,O2slope.r2.2,O2slope.r2.3,O2slope.r2.4)
+slopes.r2.all <- merge(slopes.r2.all, Phase.start, by=c("Phase"))
+phase.sort <- unique(mixedsort(slopes.r2.all$Phase))
+slopes.r2.all$Phase <- factor(slopes.r2.all$Phase, levels = phase.sort)
+
+
+# Add mean temperature for that trial to the slopes.r2.all file. 
+slopes.r2.all$meanTemp <- mean(RMR$Temp)
+
+# Add in time from start of file
+
+trial.first<- ddply(slopes.r2.all,"DateTime", head,1)
+slopes.r2.all$Time.m <- difftime(slopes.r2.all$DateTime, head(trial.first$DateTime,1), units="mins", tz = "America/Los_Angeles")
+
+# As you go through the text files from autoresp, you can consecutively add all of the slopes data, etc. to the slopes.all file, which is your big giant master file with all the data. After I calculate the slopes & r2 etc. for each file, then load the morphometrics data file and merge them together based on FishId. Bind days together first, then everything. 
+
+slopes.all <- slopes.r2.all # Note that you only run this line for the very first batch to generate the slopes.all file! 
+
+
+# Plot
+ggplot(slopes.r2.all, aes(x=DateTime, y=(-1*Slope)))+
+  geom_point(aes(color=FishID))+
+  theme_bw()
+
+# Above this point is to generate all of the slopes. But, we just want one representative slope for every fish. So I am averaging the three lowest slopes. Everything below is to generate just that one representative slope: 
+
+# Sort based on slope value for every fish: 
+
+Fish1_sorted_slopes <- O2slope.r2.1[order(-O2slope.r2.1$Slope.hour),]
+
+Fish2_sorted_slopes <- O2slope.r2.2[order(-O2slope.r2.2$Slope.hour),]
+
+Fish3_sorted_slopes <- O2slope.r2.3[order(-O2slope.r2.3$Slope.hour),]
+
+Fish4_sorted_slopes <- O2slope.r2.4[order(-O2slope.r2.4$Slope.hour),]
+
+# Remove the first two measurement periods. We don't want to include the first chunk of time immediately post-handling because thats a priori information that the fish was stressed. 
+
+Fish1_sorted_slopes <- dplyr::filter(Fish1_sorted_slopes, !grepl('M1', Phase))
+Fish1_sorted_slopes <- dplyr::filter(Fish1_sorted_slopes, !grepl('M2', Phase))
+Fish1_sorted_slopes <- dplyr::filter(Fish1_sorted_slopes, !grepl('M1   ', Phase))
+Fish1_sorted_slopes <- dplyr::filter(Fish1_sorted_slopes, !grepl('M2   ', Phase))
+
+Fish2_sorted_slopes <- dplyr::filter(Fish2_sorted_slopes, !grepl('M1', Phase))
+Fish2_sorted_slopes <- dplyr::filter(Fish2_sorted_slopes, !grepl('M2', Phase))
+Fish2_sorted_slopes <- dplyr::filter(Fish2_sorted_slopes, !grepl('M1   ', Phase))
+Fish2_sorted_slopes <- dplyr::filter(Fish2_sorted_slopes, !grepl('M2   ', Phase))
+
+Fish3_sorted_slopes <- dplyr::filter(Fish3_sorted_slopes, !grepl('M1', Phase))
+Fish3_sorted_slopes <- dplyr::filter(Fish3_sorted_slopes, !grepl('M2', Phase))
+Fish3_sorted_slopes <- dplyr::filter(Fish3_sorted_slopes, !grepl('M1   ', Phase))
+Fish3_sorted_slopes <- dplyr::filter(Fish3_sorted_slopes, !grepl('M2   ', Phase))
+
+Fish4_sorted_slopes <- dplyr::filter(Fish4_sorted_slopes, !grepl('M1', Phase))
+Fish4_sorted_slopes <- dplyr::filter(Fish4_sorted_slopes, !grepl('M2', Phase))
+Fish4_sorted_slopes <- dplyr::filter(Fish4_sorted_slopes, !grepl('M1   ', Phase))
+Fish4_sorted_slopes <- dplyr::filter(Fish4_sorted_slopes, !grepl('M2   ', Phase))
+
+# Average lowest three
+
+Fish1avgslopehour <- mean(head(Fish1_sorted_slopes$Slope.hour, 3))
+Fish1avgslope <- mean(head(Fish1_sorted_slopes$Slope, 3))
+Fish1avgR2 <- mean(head(Fish1_sorted_slopes$r2, 3))
+
+Fish1finalRMR <- matrix(c(Fish1, Fish1avgslope, Fish1avgslopehour, Fish1avgR2), nrow=1, ncol=4)
+
+Fish2avgslopehour <- mean(head(Fish2_sorted_slopes$Slope.hour, 3))
+Fish2avgslope <- mean(head(Fish2_sorted_slopes$Slope, 3))
+Fish2avgR2 <- mean(head(Fish2_sorted_slopes$r2, 3))
+
+Fish2finalRMR <- matrix(c(Fish2, Fish2avgslope, Fish2avgslopehour, Fish2avgR2), nrow=1, ncol=4)
+
+Fish3avgslopehour <- mean(head(Fish3_sorted_slopes$Slope.hour, 3))
+Fish3avgslope <- mean(head(Fish3_sorted_slopes$Slope, 3))
+Fish3avgR2 <- mean(head(Fish3_sorted_slopes$r2, 3))
+
+Fish3finalRMR <- matrix(c(Fish3, Fish3avgslope, Fish3avgslopehour, Fish3avgR2), nrow=1, ncol=4)
+
+Fish4avgslopehour <- mean(head(Fish4_sorted_slopes$Slope.hour, 3))
+Fish4avgslope <- mean(head(Fish4_sorted_slopes$Slope, 3))
+Fish4avgR2 <- mean(head(Fish4_sorted_slopes$r2, 3))
+
+Fish4finalRMR <- matrix(c(Fish4, Fish4avgslope, Fish4avgslopehour, Fish4avgR2), nrow=1, ncol=4)
+
+# Bind all averaged slopes from this trial together: 
+average.slopes <- rbind(Fish1finalRMR, Fish2finalRMR, Fish3finalRMR, Fish4finalRMR)
+
+#Add mean temp of this trial to final file: 
+average.slopes <- cbind(average.slopes, mean(RMR$Temp))
+colnames(average.slopes) <- c("FishID", "FinalSlope", "FinalSlopeHour", "FinalR2", "meanTemp")
+
+slopes.all.final <- average.slopes # Note that you only run this line for the very first batch to generate the slopes.all file! 
+
+# SO, you want the slopes.all.final slopes for the averaged of the lowest three. The slopes.all file has all of the measurement periods for every fish. 
+
+```
+
+## Blanks
+
+### D1_blank_C (one example blank)
+
+```{r}
+# Load txt file
+RMR_raw <- readclean("2018_burbot_resp_D1_blank_C_raw.txt")
+
+# Assign names for this trial: 
+
+"Fish1" <- "D1_blank_C1"
+"Fish2" <- "D1_blank_C2"
+"Fish3" <- "D1_blank_C3"
+"Fish4" <- "D1_blank_C4"
+
+# Create a new column with the time in minutes from the start of the file: 
+
+RMR_raw$Time.m <- sapply(seq_along(RMR_raw$DateTime),
+function(i) as.numeric(difftime(RMR_raw$DateTime[i], RMR_raw$DateTime[1], units='mins')))
+
+
+# Pull measure periods. Grep finds all of the data in the Phase column that contains the letter M. 
+
+RMR <- RMR_raw[grep("M", RMR_raw$Phase), ]
+
+
+# Pull out first value of each phase for graphing later
+Phase.start <- ddply(RMR, "Phase", head, 1)
+Phase.start <- Phase.start[,1:2]
+
+
+# Change the column names of the chambers to the appropriate FishID:
+Name.vec <- c(Fish1, Fish2, Fish3, Fish4)
+names(RMR)[5:8] <- Name.vec
+
+
+# Reshape the data so all O2 saturation values are in a single column:
+
+RMR.2 <- melt(RMR, measure = Name.vec)
+
+# Rename the columns. 
+names(RMR.2) <-c("DateTime","Phase","Salinity","Temp","Time.m","FishID","O2.sat")
+
+# Plot the measurement periods of all fish from this trial:
+p=ggplot(data=RMR.2, aes(x=Time.m, y=O2.sat, group=Phase))
+p+geom_point(aes(color=FishID))+theme_bw()
+
+
+# Separate out individual fish for graphing/analysis:
+
+## Separate each fish to it's own RMR file: 
+Fish1_RMR <- filter(RMR.2, FishID == Fish1)
+Fish2_RMR <- filter(RMR.2, FishID == Fish2)
+Fish3_RMR <- filter(RMR.2, FishID == Fish3)
+Fish4_RMR <- filter(RMR.2, FishID == Fish4)
+```
+
+```{r eval=FALSE}
+## Plot individual measurement periods for each fish: 
+p=ggplot(data=Fish1_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase), group=1)+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish1) 
+
+p=ggplot(data=Fish2_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish2) 
+
+p=ggplot(data=Fish3_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish3) 
+
+p=ggplot(data=Fish4_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  labs(title = Fish4) 
+
+##Plot individual measurement periods with the line of best fit: 
+
+p=ggplot(data=Fish1_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish1) 
+
+p=ggplot(data=Fish2_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish2) 
+
+p=ggplot(data=Fish3_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish3) 
+
+p=ggplot(data=Fish4_RMR, aes(x=Time.m, y=as.numeric(O2.sat)))
+p+geom_line(aes(color=Phase))+theme_bw()+facet_wrap(~Phase, ncol=8)+
+  scale_y_continuous(name="% air saturation", breaks=seq(90, 160, 50))+
+  scale_x_continuous(name="Time (min)") +
+  geom_smooth(method="lm", color="black") +
+  labs(title = Fish4) 
+```
+
+```{r}
+# Calculate slopes of lines for each fish and convert slope from minutes to hours:
+O2slopel1 <- dlply(Fish1_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope1 <- ldply(O2slopel1, function(d) coef(d))
+names(O2slope1) <- c("Phase", "Intercept","Slope")
+O2slope1<- mutate(O2slope1, FishID = Fish1)
+O2slope1<-ddply(O2slope1, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel2 <- dlply(Fish2_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope2 <- ldply(O2slopel2, function(d) coef(d))
+names(O2slope2) <- c("Phase", "Intercept","Slope")
+O2slope2 <- mutate(O2slope2, FishID = Fish2)
+O2slope2<-ddply(O2slope2, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel3 <- dlply(Fish3_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope3 <- ldply(O2slopel3, function(d) coef(d))
+names(O2slope3) <- c("Phase", "Intercept","Slope")
+O2slope3 <- mutate(O2slope3, FishID = Fish3)
+O2slope3<-ddply(O2slope3, .(Phase), mutate, Slope.hour=Slope*60)
+
+O2slopel4 <- dlply(Fish4_RMR, .(Phase), function(d) lm(O2.sat ~ Time.m, data = d))
+O2slope4 <- ldply(O2slopel4, function(d) coef(d))
+names(O2slope4) <- c("Phase", "Intercept","Slope")
+O2slope4 <- mutate(O2slope4, FishID = Fish4)
+O2slope4<-ddply(O2slope4, .(Phase), mutate, Slope.hour=Slope*60)
+
+
+# Calculating the fit of each slope: 
+O2.r2.1 <- dlply(Fish1_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit1<-ldply(O2.r2.1, function(d) d$r.squared)
+slopefit1
+names(slopefit1) <-c("Phase","r2")
+
+O2.r2.2 <- dlply(Fish2_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit2<-ldply(O2.r2.2, function(d) d$r.squared)
+slopefit2
+names(slopefit2) <-c("Phase","r2")
+
+O2.r2.3 <- dlply(Fish3_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit3<-ldply(O2.r2.3, function(d) d$r.squared)
+slopefit3
+names(slopefit3) <-c("Phase","r2")
+
+O2.r2.4 <- dlply(Fish4_RMR, .(Phase), function(d) summary(lm(O2.sat ~ Time.m, data = d))) 
+slopefit4<-ldply(O2.r2.4, function(d) d$r.squared)
+slopefit4
+names(slopefit4) <-c("Phase","r2")
+
+
+# merge together slope and r2:
+O2slope.r2.1<-merge(O2slope1, slopefit1, by=c("Phase"))
+O2slope.r2.1<- O2slope.r2.1[mixedorder(O2slope.r2.1$Phase),]
+O2slope.r2.1
+
+O2slope.r2.2<-merge(O2slope2, slopefit2, by=c("Phase"))
+O2slope.r2.2<- O2slope.r2.2[mixedorder(O2slope.r2.2$Phase),]
+O2slope.r2.2
+
+O2slope.r2.3<-merge(O2slope3, slopefit3, by=c("Phase"))
+O2slope.r2.3<- O2slope.r2.3[mixedorder(O2slope.r2.3$Phase),]
+O2slope.r2.3
+
+O2slope.r2.4<-merge(O2slope4, slopefit4, by=c("Phase"))
+O2slope.r2.4<- O2slope.r2.4[mixedorder(O2slope.r2.4$Phase),]
+O2slope.r2.4
+
+# bind all slope and r2 dataframes and sort the phases so they're in order:
+slopes.r2.all <- rbind(O2slope.r2.1,O2slope.r2.2,O2slope.r2.3,O2slope.r2.4)
+slopes.r2.all <- merge(slopes.r2.all, Phase.start, by=c("Phase"))
+phase.sort <- unique(mixedsort(slopes.r2.all$Phase))
+slopes.r2.all$Phase <- factor(slopes.r2.all$Phase, levels = phase.sort)
+
+
+# Add mean temperature for that trial to the slopes.r2.all file. 
+slopes.r2.all$meanTemp <- mean(RMR$Temp)
+
+# Add in time from start of file
+
+trial.first<- ddply(slopes.r2.all,"DateTime", head,1)
+slopes.r2.all$Time.m <- difftime(slopes.r2.all$DateTime, head(trial.first$DateTime,1), units="mins", tz = "America/Los_Angeles")
+
+# As you go through the text files from autoresp, you can consecutively add all of the slopes data, etc. to the slopes.all file, which is your big giant master file with all the data. After I calculate the slopes & r2 etc. for each file, then load the morphometrics data file and merge them together based on FishId. Bind days together first, then everything. 
+slopes.all <- rbind(slopes.all, slopes.r2.all)
+
+
+# Plot
+ggplot(slopes.r2.all, aes(x=DateTime, y=Slope))+
+  geom_point(aes(color=FishID))+
+  theme_bw()
+
+
+# Average all of the blank measurements: 
+
+Fish1avgslopehour <- mean(O2slope.r2.1$Slope.hour)
+Fish1avgslope <- mean(O2slope.r2.1$Slope)
+Fish1avgR2 <- mean(O2slope.r2.1$r2)
+
+Fish1finalRMR <- matrix(c(Fish1, Fish1avgslope, Fish1avgslopehour, Fish1avgR2), nrow=1, ncol=4)
+
+Fish2avgslopehour <- mean(O2slope.r2.2$Slope.hour)
+Fish2avgslope <- mean(O2slope.r2.2$Slope)
+Fish2avgR2 <- mean(O2slope.r2.2$r2)
+
+Fish2finalRMR <- matrix(c(Fish2, Fish2avgslope, Fish2avgslopehour, Fish2avgR2), nrow=1, ncol=4)
+
+Fish3avgslopehour <- mean(O2slope.r2.3$Slope.hour)
+Fish3avgslope <- mean(O2slope.r2.3$Slope)
+Fish3avgR2 <- mean(O2slope.r2.3$r2)
+
+Fish3finalRMR <- matrix(c(Fish3, Fish3avgslope, Fish3avgslopehour, Fish3avgR2), nrow=1, ncol=4)
+
+Fish4avgslopehour <- mean(O2slope.r2.4$Slope.hour)
+Fish4avgslope <- mean(O2slope.r2.4$Slope)
+Fish4avgR2 <- mean(O2slope.r2.4$r2)
+
+Fish4finalRMR <- matrix(c(Fish4, Fish4avgslope, Fish4avgslopehour, Fish4avgR2), nrow=1, ncol=4)
+
+# Bind all blanks from this trial together: 
+average.slopes <- rbind(Fish1finalRMR, Fish2finalRMR, Fish3finalRMR, Fish4finalRMR)
+
+#Add mean temp of this trial to final file: 
+average.slopes <- cbind(average.slopes, mean(RMR$Temp))
+colnames(average.slopes) <- c("FishID", "FinalSlope", "FinalSlopeHour", "FinalR2", "meanTemp")
+
+# Create a file for the blanks; 
+slopes.all.final.blanks <- average.slopes # Note that you only run this line for the very first batch to generate the slopes.all file! 
+
+```
+
+# Transform final data 
+```{r}
+
+# Transform the final slopes.all.final file into a dataframe. Only run this after appending all of the slopes for every trial to slopes.all.final. 
+
+slopes.all.final <-as.data.frame(slopes.all.final) 
+
+str(slopes.all.final)
+
+slopes.all.final <- transform(slopes.all.final, FinalSlope = as.numeric(as.character(FinalSlope)), FinalSlopeHour = as.numeric(as.character(FinalSlopeHour)), FinalR2 = as.numeric(as.character(FinalR2)), meanTemp = as.numeric(as.character(meanTemp)))
+
+str(slopes.all.final)
+
+# Transform the same thing but for the blank slopes file
+
+slopes.all.final.blanks <-as.data.frame(slopes.all.final.blanks) 
+
+str(slopes.all.final.blanks)
+
+slopes.all.final.blanks <- transform(slopes.all.final.blanks, FinalSlope = as.numeric(as.character(FinalSlope)), FinalSlopeHour = as.numeric(as.character(FinalSlopeHour)), FinalR2 = as.numeric(as.character(FinalR2)), meanTemp = as.numeric(as.character(meanTemp)))
+
+str(slopes.all.final.blanks)
+
+```
+
+# Subtract blanks 
+
+```{r}
+
+names(slopes.all.final.blanks) <- c("BlankFishID", "BlankFinalSlope", "BlankFinalSlopeHour", "BlankFinalR2", "BlankmeanTemp")
+
+
+slopes.all.final <- separate(slopes.all.final, FishID, c("Day", "Batch", "Chamber"), sep = "_", remove=FALSE)
+blank <- separate(slopes.all.final.blanks, BlankFishID, c("Day", "Batch", "Chamber"), sep = "_", remove=FALSE)
+
+
+joined <- inner_join(blank, slopes.all.final, by = c("Day", "Chamber"))
+
+joined$CorrectedSlope <- (joined$FinalSlope - joined$BlankFinalSlope)
+joined$CorrectedSlopeHour <- (joined$FinalSlopeHour - joined$BlankFinalSlopeHour)
+
+corrected.slopes <- subset(joined, select=c("FishID", "meanTemp", "CorrectedSlope", "CorrectedSlopeHour", "FinalR2"))
+
+```
+
+# O2 Saturation Function 
+```{r}
+
+# Function: 
+O2.saturation<-function(salinity, temp, measured.atmP, perc.sat) {
+  
+  a=4.9e1
+  b=-1.335
+  c=2.759e-2
+  d=-3.235e-4
+  e=1.598e-6
+  p=5.516e-1
+  q=-1.759e-2
+  r=2.253e-4
+  s=-2.654e-7
+  t=5.362e-8
+  A=5.257e1
+  B=6.69e3
+  C=4.681
+  TK=temp+273
+  Chloride=(salinity-0.03)/1.805
+  atmPsealevel=1013
+  MolVol=22.414
+  MWO2=32
+  
+  alpha=a+(b*temp)+(c*temp^2)+(d*temp^3)+(e*temp^4)-(Chloride*(p+(q*temp)+(r*temp^2)+(s*temp^3)+(t*temp^4)))
+  bunsen=alpha/1000
+  vapP=exp(A-(B/TK)-(C*log(TK)))
+  
+  umoleO2.per.L<-(((measured.atmP-vapP)/atmPsealevel)*(perc.sat/100)*0.2095*bunsen*1e6*(1/MolVol))
+  mgO2.per.L<-umoleO2.per.L*(MWO2/1000)
+  pO2.torr<-((measured.atmP-vapP)*((perc.sat/100)*0.2095))*0.75
+  pO2.mbar<-pO2.torr/0.75
+  pO2.kPa<-pO2.mbar/10
+  
+  output<-data.frame(salinity, temp, measured.atmP, perc.sat, umoleO2.per.L, mgO2.per.L, pO2.torr, pO2.mbar, pO2.kPa)
+  print(output) # I changed this so it only gives me umoleO2.per.L, take out the [5] if you want all the variables
+}
+
+```
+
+
+## O2 calcs, final slopes
+
+### Load morphometrics data file
+```{r}
+MorphometricsData<-read.csv("2018BurbotRespirometryMorphometrics.csv")
+O2.all.final<-merge(corrected.slopes, MorphometricsData, by=c("FishID"), all.x=TRUE)
+# O2.all<-merge(slopes.all, MorphometricsData, by=c("FishID"), all.x=TRUE)
+```
+
+### O2 saturation
+```{r}
+
+#O2.sol <- as.numeric(O2.saturation(0, test.Temp, BP.mBar, 100))[[6]] #The 6th one is mg.O2.L, salinity was set to 0
+
+# Add columns for 100% saturation in two units. This use salinity, temperature, and barometric pressure of the trial to calculate what 100% oxygen would be. 
+O2.all.final$mgO2perL <-O2.saturation(0,O2.all.final$meanTemp,O2.all.final$BaroPressure.hPa., 100)[[6]]
+O2.all.final$umoleO2perL <-O2.saturation(0,O2.all.final$meanTemp,O2.all.final$BaroPressure.hPa., 100)[[5]]
+
+# The function just needs salinity, temp, barometric pressure in hPa, and percent saturation, usually 100% for our purposes. 
+
+```
+
+### O2 units
+```{r Converting from % Oxygen Saturation to mmolO2/L*h}
+# convert from %saturation to mgO2/L*h and mmolO2/L*h
+O2.all.final$mgO2Lh<-(O2.all.final$CorrectedSlopeHour/100)*O2.all.final$mgO2perL
+O2.all.final$mmolO2Lh<-(O2.all.final$CorrectedSlopeHour/100)*(O2.all.final$umoleO2perL/1000)
+
+# Remove fish mass from chamber volume because fish is displacing water volume. 
+
+O2.all.final$Net.vol <- (O2.all.final$ChamberVolume.mL. - O2.all.final$Weight.g.)
+
+
+# Remove liters from calculation (net.vol in mL) mgO2/h and mmolO2/h
+# Net volume is in mL, but O2 saturation is in L, so you have to divide by 1000.
+O2.all.final$mgO2h<-O2.all.final$mgO2Lh*O2.all.final$Net.vol/1000
+O2.all.final$mmolO2h<-O2.all.final$mmolO2Lh*O2.all.final$Net.vol/1000
+
+# Multiply by -1 to have a positive O2 rate
+O2.all.final<- mutate(O2.all.final, mgO2h.pos = mgO2h*-1)
+O2.all.final<- mutate(O2.all.final, mmolO2h.pos = mmolO2h*-1)
+
+# Calculate mass specific metabolic rates (mass in g)
+O2.all.final$mass.specific.rate.mgO2kghr <- (O2.all.final$mgO2h.pos/(O2.all.final$Weight.g./1000))
+O2.all.final$mass.specific.rate.mmolO2kghr <- (O2.all.final$mmolO2h.pos/(O2.all.final$Weight.g./1000))
+O2.all.final$mass.specific.rate.mgO2kgmin <- (O2.all.final$mass.specific.rate.mgO2kghr/60)
+O2.all.final$mass.specific.rate.mmolO2kgmin <- (O2.all.final$mass.specific.rate.mmolO2kghr/60)
+
+O2.all.final$mass.specific.rate.umolO2ghr <- ((O2.all.final$mmolO2h.pos*1000)/O2.all.final$Weight.g.)
+
+O2.all.final$mass.specific.rate.mgO2per25gperhr <- 
+  ((O2.all.final$mass.specific.rate.mgO2kghr/1000)*25)
+
+```
+
+### Plot 
+```{r}
+
+View(O2.all.final)
+ggplot(O2.all.final, aes(x=FishID, y=mass.specific.rate.umolO2ghr)) + 
+  geom_point()
+
+```
+
